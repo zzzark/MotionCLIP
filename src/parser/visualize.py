@@ -58,7 +58,7 @@ def add_visualize_options(parser):
     group.add_argument("--images_dir", type=str, default='./action_images',
                        help="dir with images for clip visualization")
 
-    group.add_argument("--input_file", default=None, help="Input txt/csv file defining generation. For more info, see README.")
+    group.add_argument("--input_file", default='./assets/rm_texts.txt', help="Input txt/csv file defining generation. For more info, see README.")
 
     group.add_argument("--zero_global_orient", action='store_true', help="will set global orientation to zero")
     group.add_argument("--ae_after_generation", action='store_true', help="Apply auto encoding after generation to project motion into motion manifold.")
@@ -67,7 +67,8 @@ def add_visualize_options(parser):
 def parser(checkpoint=True):
     parser = ArgumentParser()
     if checkpoint:
-        parser.add_argument("checkpointname")
+        # parser.add_argument("checkpointname", default='./exps/paper-model/checkpoint_0100.pth.tar')
+        pass
     else:
         add_dataset_options(parser)
 
@@ -80,7 +81,8 @@ def parser(checkpoint=True):
     opt = parser.parse_args()
     if checkpoint:
         newparameters = {key: val for key, val in vars(opt).items() if val is not None}
-        folder, checkpoint = os.path.split(newparameters["checkpointname"])
+        newparameters['checkpointname'] = './exps/paper-model/checkpoint_0100.pth.tar'
+        folder, checkpoint_path = os.path.split(newparameters["checkpointname"])
         parameters = load_args(os.path.join(folder, "opt.yaml"))
         parameters.update(newparameters)
     else:
@@ -90,7 +92,7 @@ def parser(checkpoint=True):
 
     if checkpoint:
         parameters["figname"] = construct_figname(parameters)
-        epoch = int(checkpoint.split("_")[-1].split('.')[0])
-        return parameters, folder, checkpoint, epoch
+        epoch = int(checkpoint_path.split("_")[-1].split('.')[0])
+        return parameters, folder, checkpoint_path, epoch
     else:
         return parameters

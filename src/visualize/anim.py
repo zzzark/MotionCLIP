@@ -128,12 +128,12 @@ def plot_3d_motion(motion, length, save_path, params, title="", interval=50, pal
         if kinematic_tree is not None:
             for chain, color in zip(kinematic_tree, colors):
                 ax.plot(motion[chain, 0, index],
-                        motion[chain, 1, index],
+                        -motion[chain, 1, index],  # RM: fix y-axis upside-down problem
                         motion[chain, 2, index], linewidth=4.0, color=color)
         else:
-            ax.scatter(motion[1:, 0, index], motion[1:, 1, index],
+            ax.scatter(motion[1:, 0, index], -motion[1:, 1, index],  # RM: fix y-axis upside-down problem
                        motion[1:, 2, index], c="red")
-            ax.scatter(motion[:1, 0, index], motion[:1, 1, index],
+            ax.scatter(motion[:1, 0, index], -motion[:1, 1, index],  # RM: fix y-axis upside-down problem
                        motion[:1, 2, index], c="blue")
 
     wraped_title = '\n'.join(wrap(title, 20))

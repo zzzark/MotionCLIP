@@ -193,12 +193,12 @@ class MOTIONCLIP(nn.Module):
                  # input_type="motion",
                  textual_labels=None):
         clip_dim = self.clip_model.ln_final.normalized_shape[0]
-        if is_clip_features:
+        if is_clip_features:  # rm True
             # assumed dims: classes [nspa, nats, 512]
             assert len(classes.shape) == 3
             assert classes.shape[-1] == clip_dim
             clip_features = classes.reshape([-1, clip_dim])
-            nspa, nats = classes.shape[:2]
+            nspa, nats = classes.shape[:2]  # rm [1, #sentences]
             # y = torch.zeros(y_action_names.shape, dtype=int)
             y = clip_features
             if textual_labels is not None:
@@ -207,21 +207,21 @@ class MOTIONCLIP(nn.Module):
         if len(durations.shape) == 1:
             lengths = durations.to(self.device).repeat(nspa)
         else:
-            lengths = durations.to(self.device).reshape(clip_features.shape[0])
+            lengths = durations.to(self.device).reshape(clip_features.shape[0])  # rm [#sentences, ];  #frames == 60
 
-        mask = self.lengths_to_mask(lengths)
+        mask = self.lengths_to_mask(lengths)  # rm [#sentences, #frames]
 
         batch = {"z": clip_features,  # fact*z,
                  "y": y,
-                 "mask": mask, "lengths": lengths}
+                 "mask": mask, "lengths": lengths}  # rm y is clip_features
 
         if not is_clip_features:
             batch['y'] = y
 
-        batch = self.decoder(batch)
+        batch = self.decoder(batch)  # rm batch['output'].shape == [#sentences, 25, 6, 60], [#s, #joints, 6D, #frames]
 
         if is_amass:  # lose global orientation for amass dataset
-            batch['output'][:, 0] = torch.tensor([1, 0, 0, 0, -1, 0]).unsqueeze(0).unsqueeze(2)
+            batch['output'][:, 0] = torch.tensor([1, 0, 0, 0, -1, 0]).unsqueeze(0).unsqueeze(2)  # [1, 6, 1], identity rotation
 
         if self.outputxyz:
             batch["output_xyz"] = self.rot2xyz(batch["output"], batch["mask"])

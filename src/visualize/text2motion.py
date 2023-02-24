@@ -34,7 +34,9 @@ def main():
         grid.append(texts[i * 4:(i + 1) * 4])
     grid[-1] += [''] * (4 - len(grid[-1]))
 
-    viz_clip_text(model, grid, epoch, parameters, folder=folder)
+    out_folder = "./output"
+    os.makedirs(out_folder, exist_ok=True)
+    viz_clip_text(model, grid, epoch, parameters, folder=out_folder)
 
 
 if __name__ == '__main__':
