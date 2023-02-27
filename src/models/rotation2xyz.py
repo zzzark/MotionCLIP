@@ -25,8 +25,8 @@ class Rotation2xyz:
         if jointstype not in JOINTSTYPES:
             raise NotImplementedError("This jointstype is not implemented.")
 
-        if translation:                    # rm x.shape == [#sen, #joints, #6D, #frames]
-            x_translations = x[:, -1, :3]  # rm last dimension is translation, 0:3 ==> pos; 3:6 ==> zero
+        if translation:                    # rm x.shape == [#sentenses, #joints, #6D, #frames], J=25
+            x_translations = x[:, -1, :3]  # rm The last joint is translation, 0:3 ==> pos; 3:6 ==> zero
             x_rotations = x[:, :-1]
         else:
             x_rotations = x
@@ -42,7 +42,7 @@ class Rotation2xyz:
         elif pose_rep == "rotquat":
             rotations = geometry.quaternion_to_matrix(x_rotations[mask])
         elif pose_rep == "rot6d":
-            rotations = geometry.rotation_6d_to_matrix(x_rotations[mask])  # rm to Input: [#S x #F, joints, 6]
+            rotations = geometry.rotation_6d_to_matrix(x_rotations[mask])  # rm to Input: [#S x #F, joints, 6], J=24
         else:
             raise NotImplementedError("No geometry for this one.")
 
@@ -51,8 +51,8 @@ class Rotation2xyz:
             global_orient = geometry.axis_angle_to_matrix(global_orient).view(1, 1, 3, 3)
             global_orient = global_orient.repeat(len(rotations), 1, 1, 1)
         else:
-            global_orient = rotations[:, 0]  # rm [#S x #F, joints, 3, 3], take the first joint as global joint.
-            rotations = rotations[:, 1:]  # rm And remain the lasts.
+            global_orient = rotations[:, 0]  # rm [#S x #F, joints, 3, 3], J=24, take the first joint as global joint.
+            rotations = rotations[:, 1:]  # rm And the remaining is rotations.  [8x60, 23, 3, 3]
 
         if betas is None:
             betas = torch.zeros([rotations.shape[0], self.smpl_model.num_betas],  # rm Use default betas. [#S x #F, 10]

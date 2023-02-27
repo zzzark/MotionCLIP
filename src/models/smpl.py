@@ -85,7 +85,7 @@ class SMPL(_SMPLLayer):
         extra_joints = vertices2joints(self.J_regressor_extra, smpl_output.vertices)
         all_joints = torch.cat([smpl_output.joints, extra_joints], dim=1)
 
-        output = {"vertices": smpl_output.vertices}
+        output = {"vertices": smpl_output.vertices, 'faces': self.faces}
 
         for joinstype, indexes in self.maps.items():
             output[joinstype] = all_joints[:, indexes]
