@@ -20,11 +20,13 @@ def main():
     parameters["device"] = f"cuda:{gpu_device}"
     model, datasets = get_model_and_data(parameters, split='vald')
 
+    # load checkpoint
     print("Restore weights..")
     checkpointpath = os.path.join(folder, checkpointname)
     state_dict = torch.load(checkpointpath, map_location=parameters["device"])
     load_model_wo_clip(model, state_dict)
 
+    # load input files
     assert os.path.isfile(parameters['input_file'])
     with open(parameters['input_file'], 'r') as fr:
         texts = fr.readlines()
@@ -34,6 +36,7 @@ def main():
         grid.append(texts[i * 4:(i + 1) * 4])
     grid[-1] += [''] * (4 - len(grid[-1]))
 
+    # save output
     out_folder = "./output"
     os.makedirs(out_folder, exist_ok=True)
     viz_clip_text(model, grid, epoch, parameters, folder=out_folder)

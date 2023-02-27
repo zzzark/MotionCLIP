@@ -13,7 +13,7 @@ def test_smpl(device):
     betas = torch.zeros(frame, 10)
     output = smpl_model(body_pose=loc_rot, global_orient=glb_rot, betas=betas)
     vertices = output['vertices']  # torch.Tensor [frame, 6890, 3]
-    faces = output['faces']  # numpy.ndarray [13776, 3]
+    faces = smpl_model.faces  # numpy.ndarray [13776, 3]
 
     return vertices.cpu().numpy(), faces
 

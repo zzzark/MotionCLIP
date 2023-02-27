@@ -4,7 +4,7 @@ from .hessian_penalty import hessian_penalty
 from .mmd import compute_mmd
 
 
-def compute_rc_loss(model, batch, use_txt_output=False):
+def compute_rc_loss(model, batch, use_txt_output=False):  # RM: reconstruction loss
     x = batch["x"]
     output = batch["output"]
     mask = batch["mask"]
@@ -30,7 +30,7 @@ def compute_rcxyz_loss(model, batch, use_txt_output=False):
     return loss
 
 
-def compute_vel_loss(model, batch, use_txt_output=False):
+def compute_vel_loss(model, batch, use_txt_output=False):  # RM: velocity loss
     x = batch["x"]
     output = batch["output"]
     if use_txt_output:

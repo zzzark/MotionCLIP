@@ -83,6 +83,11 @@ class Encoder_TRANSFORMER(nn.Module):
                                                      num_layers=self.num_layers)
 
     def forward(self, batch):
+        # RM
+        #   x:     input motion sequences
+        #   y:     action label? see `src.datasets.dataset.py > line 246`
+        #   mask:  to mask the length difference of input motion sequences, see `src.models.tools.losses.py`
+        #
         x, y, mask = batch["x"], batch["y"], batch["mask"]
         bs, njoints, nfeats, nframes = x.shape
         x = x.permute((3, 0, 1, 2)).reshape(nframes, bs, njoints * nfeats)
@@ -91,8 +96,8 @@ class Encoder_TRANSFORMER(nn.Module):
         x = self.skelEmbedding(x)
 
         # Blank Y to 0's , no classes in our model, only learned token
-        y = y - y
-        xseq = torch.cat((self.muQuery[y][None], self.sigmaQuery[y][None], x), axis=0)
+        y = y - y  # rm: i.e. do not use action one-hot label
+        xseq = torch.cat((self.muQuery[y][None], self.sigmaQuery[y][None], x), axis=0)  # rm Fetch the first token.
 
         # add positional encoding
         xseq = self.sequence_pos_encoder(xseq)
@@ -162,6 +167,12 @@ class Decoder_TRANSFORMER(nn.Module):
         self.finallayer = nn.Linear(self.latent_dim, self.input_feats)
         
     def forward(self, batch, use_text_emb=False):
+        # RM
+        #   z:        clip latent code
+        #   y:        y is z  (only used in ablation)
+        #   mask:     to mask the length difference of output motion sequences, see `src.models.tools.losses.py`
+        #   lengths:  lengths of motion outputs
+        #
         z, y, mask, lengths = batch["z"], batch["y"], batch["mask"], batch["lengths"]
         if use_text_emb:
             z = batch["clip_text_emb"]
@@ -175,13 +186,11 @@ class Decoder_TRANSFORMER(nn.Module):
             z = torch.cat((z, yoh), axis=1)
             z = self.ztimelinear(z)
             z = z[None]  # sequence of size 1
+        elif self.ablation == "concat_bias":  # only for ablation / not used in the final model
+            # sequence of size 2
+            z = torch.stack((z, self.actionBiases[y]), axis=0)
         else:
-            # only for ablation / not used in the final model
-            if self.ablation == "concat_bias":
-                # sequence of size 2
-                z = torch.stack((z, self.actionBiases[y]), axis=0)
-            else:
-                z = z[None]  # sequence of size 1  #
+            z = z[None]  # sequence of size 1  #  # rm: to first token, i.e. frame count == 1
 
         timequeries = torch.zeros(nframes, bs, latent_dim, device=z.device)
         
@@ -189,7 +198,7 @@ class Decoder_TRANSFORMER(nn.Module):
         if self.ablation == "time_encoding":
             timequeries = self.sequence_pos_encoder(timequeries, mask, lengths)
         else:
-            timequeries = self.sequence_pos_encoder(timequeries)
+            timequeries = self.sequence_pos_encoder(timequeries)  # rm: positional encoding?
         
         output = self.seqTransDecoder(tgt=timequeries, memory=z,
                                       tgt_key_padding_mask=~mask)
