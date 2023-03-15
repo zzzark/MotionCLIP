@@ -261,6 +261,28 @@ def viz_clip_text(model, text_grid, epoch, params, folder):
                                     is_clip_features=True)
         generation['y'] = texts
 
+    # ---- DEBUG: save output results for testing ---- #
+    torch.save(generation, "./output/tmp_save.pth")
+    print(generation['output'].shape)  # [B, J, C, T]
+    from export_output_to_bvh import Out2BVH
+    o2b = Out2BVH()
+    obj = o2b.to_bvh(generation['output'])
+    obj.to_file("./output/out.bvh")
+    # -------- #
+
+    # ---- DEBUG: test fake input ---- #
+    from src.models.modeltype.motionclip import MOTIONCLIP
+    x = generation['output']
+    y = torch.zeros((x.shape[0]), device=x.device, dtype=int)
+    mask = MOTIONCLIP.lengths_to_mask(torch.ones((x.shape[0]), device=x.device, dtype=int) * 60)
+    fake_input = {'x': x, 'y': y, 'mask': mask}
+    fake_out = model.encoder(fake_input)['mu']
+    diff = torch.abs(fake_out - clip_features[0])
+    print(torch.max(diff))
+    print(torch.mean(diff))
+    exit(0)
+    # -------- #
+
     for key, val in generation.items():
         if len(generation[key].shape) == 1:
             generation[key] = val.reshape(h, w)

@@ -97,7 +97,7 @@ class Encoder_TRANSFORMER(nn.Module):
 
         # Blank Y to 0's , no classes in our model, only learned token
         y = y - y  # rm: i.e. do not use action one-hot label
-        xseq = torch.cat((self.muQuery[y][None], self.sigmaQuery[y][None], x), axis=0)  # rm Fetch the first token.
+        xseq = torch.cat((self.muQuery[y][None], self.sigmaQuery[y][None], x), dim=0)  # rm Fetch the first token.
 
         # add positional encoding
         xseq = self.sequence_pos_encoder(xseq)
@@ -105,7 +105,7 @@ class Encoder_TRANSFORMER(nn.Module):
         # create a bigger mask, to allow attend to mu and sigma
         muandsigmaMask = torch.ones((bs, 2), dtype=bool, device=x.device)
 
-        maskseq = torch.cat((muandsigmaMask, mask), axis=1)
+        maskseq = torch.cat((muandsigmaMask, mask), dim=1)
 
         final = self.seqTransEncoder(xseq, src_key_padding_mask=~maskseq)
         mu = final[0]
