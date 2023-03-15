@@ -20,10 +20,12 @@ def sample_frames(motion: torch.Tensor, scale_factor=None, target_frame=None, sa
     assert len(motion.shape) == 3, 'input rotation should be Jx(3/4)xF'
 
     if scale_factor is not None:
-        motion = F.interpolate(motion, size=None, scale_factor=scale_factor, mode=sampler)
+        # noinspection PyArgumentList
+        motion = F.interpolate(motion, size=None, recompute_scale_factor=False, scale_factor=scale_factor, mode=sampler)
 
     if target_frame is not None and motion.shape[-1] != target_frame:  # frames not aligned yet
-        motion = F.interpolate(motion, size=target_frame, scale_factor=None, mode=sampler)
+        # noinspection PyArgumentList
+        motion = F.interpolate(motion, size=target_frame, recompute_scale_factor=False, scale_factor=None, mode=sampler)
 
     return motion
 
@@ -133,86 +135,86 @@ def get_motion_masked(motion: torch.Tensor, mask: list) -> torch.Tensor:
     return motion[..., mask, :, :]
 
 
-def demo():
-    import bvh
-    a = torch.zeros((31, 3, 360))
-    b = torch.zeros((4, 31, 4, 360))
-
-    # test get motion masked
-    print(get_motion_masked(a, [0, 1, 2, 5, 7, 9]).shape)
-    print(get_motion_masked(b, [0, 1, 2, 6, 7, 8]).shape)
-
-    # test get selected joints
-    bvh_obj = bvh.parser.BVH('../data/assets/test.bvh')
-
-    cmu_mask = [
-        'Hips',             # 0
-        'LeftUpLeg',        # 2
-        'LeftLeg',          # 3
-        'LeftFoot',         # 4
-        'LeftToeBase',      # 5
-        'RightUpLeg',       # 7
-        'RightLeg',         # 8
-        'RightFoot',        # 9
-        'RightToeBase',     # 10
-        'Spine',            # 12
-        'Spine1',           # 13
-        'Neck1',            # 15
-        'Head',             # 16
-        'LeftArm',          # 18
-        'LeftForeArm',      # 19
-        'LeftHand',         # 20
-        'LeftHandIndex1',   # 22
-        'RightArm',         # 25
-        'RightForeArm',     # 26
-        'RightHand',        # 27
-        'RightHandIndex1',  # 29
-    ]
-    mask = bvh_obj.get_index_of_selected_joints(cmu_mask)
-    print(mask)
-
-    _, qua = mot.bvh_casting.get_quaternion_from_bvh(bvh_obj)
-    print(get_motion_masked(qua, mask).shape)
-
-    # test motion sampling
-    a = torch.zeros((31, 3, 360))
-    b = torch.zeros((31, 4, 360))
-
-    print(sample_frames(a, 0.25).shape)
-    print(sample_frames(b, 0.25).shape)
-
-    print(sample_frames(a, 0.25, 90).shape)
-    print(sample_frames(b, 0.25, 90).shape)
-
-    print(sample_frames(a, 0.25, sampler='linear').shape)
-    print(sample_frames(b, 0.25, sampler='linear').shape)
-
-    trs = torch.arange(300).view(1, 3, 100)
-    off = calc_joint_offset(trs)
-    trs_local = sum_joint_offset(off)
-
-    p0 = (0, 100, 200)
-    o0 = (1, 1, 1)
-    w0 = tuple([a - b for a, b in zip(p0, o0)])
-    trs_world = sum_joint_offset(off, w0)
-
-    a = trs.numpy()
-    b = off.numpy()
-    c = trs_local.numpy()
-    d = trs_world.numpy()
-    print(a)
-    print(b)
-    print(c)
-    print(d)
-
-    print((trs - trs_local).numpy())
-    print((trs - trs_world).numpy())
-
-    mo = torch.arange(12).view(2, 2, 3).float()
-    print(pad_motion(mo, 1, 2, 'constant'))
-    print(pad_motion(mo, 2, 1, 'constant'))
-    print(pad_motion(mo, 2, 1, 'reflect'))
-
-
-if __name__ == '__main__':
-    demo()
+# def demo():
+#     import bvh
+#     a = torch.zeros((31, 3, 360))
+#     b = torch.zeros((4, 31, 4, 360))
+#
+#     # test get motion masked
+#     print(get_motion_masked(a, [0, 1, 2, 5, 7, 9]).shape)
+#     print(get_motion_masked(b, [0, 1, 2, 6, 7, 8]).shape)
+#
+#     # test get selected joints
+#     bvh_obj = bvh.parser.BVH('../data/assets/test.bvh')
+#
+#     cmu_mask = [
+#         'Hips',             # 0
+#         'LeftUpLeg',        # 2
+#         'LeftLeg',          # 3
+#         'LeftFoot',         # 4
+#         'LeftToeBase',      # 5
+#         'RightUpLeg',       # 7
+#         'RightLeg',         # 8
+#         'RightFoot',        # 9
+#         'RightToeBase',     # 10
+#         'Spine',            # 12
+#         'Spine1',           # 13
+#         'Neck1',            # 15
+#         'Head',             # 16
+#         'LeftArm',          # 18
+#         'LeftForeArm',      # 19
+#         'LeftHand',         # 20
+#         'LeftHandIndex1',   # 22
+#         'RightArm',         # 25
+#         'RightForeArm',     # 26
+#         'RightHand',        # 27
+#         'RightHandIndex1',  # 29
+#     ]
+#     mask = bvh_obj.get_index_of_selected_joints(cmu_mask)
+#     print(mask)
+#
+#     _, qua = mot.bvh_casting.get_quaternion_from_bvh(bvh_obj)
+#     print(get_motion_masked(qua, mask).shape)
+#
+#     # test motion sampling
+#     a = torch.zeros((31, 3, 360))
+#     b = torch.zeros((31, 4, 360))
+#
+#     print(sample_frames(a, 0.25).shape)
+#     print(sample_frames(b, 0.25).shape)
+#
+#     print(sample_frames(a, 0.25, 90).shape)
+#     print(sample_frames(b, 0.25, 90).shape)
+#
+#     print(sample_frames(a, 0.25, sampler='linear').shape)
+#     print(sample_frames(b, 0.25, sampler='linear').shape)
+#
+#     trs = torch.arange(300).view(1, 3, 100)
+#     off = calc_joint_offset(trs)
+#     trs_local = sum_joint_offset(off)
+#
+#     p0 = (0, 100, 200)
+#     o0 = (1, 1, 1)
+#     w0 = tuple([a - b for a, b in zip(p0, o0)])
+#     trs_world = sum_joint_offset(off, w0)
+#
+#     a = trs.numpy()
+#     b = off.numpy()
+#     c = trs_local.numpy()
+#     d = trs_world.numpy()
+#     print(a)
+#     print(b)
+#     print(c)
+#     print(d)
+#
+#     print((trs - trs_local).numpy())
+#     print((trs - trs_world).numpy())
+#
+#     mo = torch.arange(12).view(2, 2, 3).float()
+#     print(pad_motion(mo, 1, 2, 'constant'))
+#     print(pad_motion(mo, 2, 1, 'constant'))
+#     print(pad_motion(mo, 2, 1, 'reflect'))
+#
+#
+# if __name__ == '__main__':
+#     demo()

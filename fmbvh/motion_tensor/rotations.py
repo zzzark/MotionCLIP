@@ -2,7 +2,7 @@ import torch
 
 
 # NOTE:
-#   the code below will be removed in the future
+#   the code below will be removed in future versions
 #
 class _SymbolWrapper:
     """
@@ -72,7 +72,7 @@ def euler_to_quaternion(eul: torch.Tensor, to_rad, order="ZYX", intrinsic=True) 
     batch, eul = (True, eul) if len(eul.shape) == 4 else (False, eul[None, ...])
 
     if len(eul.shape) != 4 or eul.shape[2] != 3:
-        raise ValueError('Input tensor should be in the shape of BxJx3xF.')
+        raise ValueError(f'Input tensor should be in the shape of BxJx3xF, but got {eul.shape}')
 
     if to_rad != 1.0:
         eul = eul * to_rad
@@ -107,10 +107,10 @@ def matrix_to_euler(mtx: torch.Tensor) -> torch.Tensor:
     :param mtx: [(B), J, 3, 3, T]
     :return: euler, [(B), J, 3, T]
     """
-    batch, qua = (True, mtx) if len(mtx.shape) == 5 else (False, mtx[None, ...])
+    batch, mtx = (True, mtx) if len(mtx.shape) == 5 else (False, mtx[None, ...])
 
     if len(mtx.shape) != 5 or mtx.shape[2] != 3 or mtx.shape[3] != 3:
-        raise ValueError('Input tensor should be in the shape of BxJx3x3xF.')
+        raise ValueError(f'Input tensor should be in the shape of BxJx3x3xF, but got {mtx.shape}')
 
     # reference: http://eecs.qmul.ac.uk/~gslabaugh/publications/euler.pdf
 
@@ -154,7 +154,7 @@ def quaternion_to_euler(qua: torch.Tensor, order='XYZ', intrinsic=True) -> torch
 
     # extrinsic to intrinsic
     if not intrinsic:
-        intrinsic = True
+        # intrinsic = True
         order = order[::-1]
 
     w = qua[..., 0:1, :]
@@ -173,9 +173,9 @@ def quaternion_to_euler(qua: torch.Tensor, order='XYZ', intrinsic=True) -> torch
         yw = 2 * y*w
         zw = 2 * z*w
 
-        roll  = torch.arctan2(xw + yz, 1 - xx - yy)
+        roll  = torch.atan2(xw + yz, 1 - xx - yy)
         pitch = torch.arcsin(torch.clip(yw - xz, min=-0.9999, max=0.9999))
-        yaw   = torch.arctan2(zw + xy, 1 - yy - zz)
+        yaw   = torch.atan2(zw + xy, 1 - yy - zz)
 
         # first roll, then pitch, then yaw
         # yaw * pitch * roll * V
@@ -363,11 +363,87 @@ def pad_position_to_quaternion(_xyz: torch.Tensor) -> torch.Tensor:
     assert _xyz.shape[-2] == 3, "input tensor shape should be [..., 3, (F)]"
 
     zero = torch.zeros_like(_xyz, dtype=_xyz.dtype, device=_xyz.device)[..., [0], :]
-    wxyz = torch.concat([zero, _xyz], dim=-2)
+    wxyz = torch.cat([zero, _xyz], dim=-2)
 
     if no_frame: wxyz = wxyz[..., 0]
 
     return wxyz
+
+
+def rotation_6d_to_matrix(d6: torch.Tensor) -> torch.Tensor:
+    """
+    :param d6: [..., 6, T]
+    :return: [..., 3, 3, T]
+    """
+    a1, a2 = d6[..., :3, :], d6[..., 3:, :]
+
+    # gram-schmidt
+    b1 = torch.nn.functional.normalize(a1, dim=-2)
+    b2 = a2 - (b1 * a2).sum(dim=-2, keepdim=True) * b1
+    b2 = torch.nn.functional.normalize(b2, dim=-2)
+    b3 = torch.cross(b1, b2, dim=-2)
+    return torch.stack((b1, b2, b3), dim=-3)
+
+
+def matrix_to_rotation_6d(matrix: torch.Tensor) -> torch.Tensor:
+    """
+    :param matrix: [..., 3, 3, T]
+    :return: [..., 6, T]
+    """
+    return matrix[..., :2, :, :].clone().reshape(*matrix.size()[:-3], 6, -1)
+
+
+# def matrix_to_quaternion(matrix):
+#     """
+#     Convert rotations given as rotation matrices to quaternions.
+#
+#     Args:
+#         matrix: Rotation matrices as tensor of shape (..., 3, 3).
+#
+#     Returns:
+#         quaternions with real part first, as tensor of shape (..., 4).
+#     """
+#
+#     def _copy_sign(a, b):
+#         """
+#         Return a tensor where each element has the absolute value taken from the,
+#         corresponding element of a, with sign taken from the corresponding
+#         element of b. This is like the standard copysign floating-point operation,
+#         but is not careful about negative 0 and NaN.
+#
+#         Args:
+#             a: source tensor.
+#             b: tensor whose signs will be used, of the same shape as a.
+#
+#         Returns:
+#             Tensor of the same shape as a with the signs of b.
+#         """
+#         signs_differ = (a < 0) != (b < 0)
+#         return torch.where(signs_differ, -a, a)
+#
+#     def _sqrt_positive_part(x):
+#         """
+#         Returns torch.sqrt(torch.max(0, x))
+#         but with a zero sub-gradient where x is 0.
+#         """
+#         ret = torch.zeros_like(x)
+#         positive_mask = x > 0
+#         ret[positive_mask] = torch.sqrt(x[positive_mask])
+#         return ret
+#
+#     if matrix.size(-1) != 3 or matrix.size(-2) != 3:
+#         raise ValueError(f"Invalid rotation matrix  shape f{matrix.shape}.")
+#     m00 = matrix[..., 0, 0]
+#     m11 = matrix[..., 1, 1]
+#     m22 = matrix[..., 2, 2]
+#     o0 = 0.5 * _sqrt_positive_part(1 + m00 + m11 + m22)
+#     x = 0.5 * _sqrt_positive_part(1 + m00 - m11 - m22)
+#     y = 0.5 * _sqrt_positive_part(1 - m00 + m11 - m22)
+#     z = 0.5 * _sqrt_positive_part(1 - m00 - m11 + m22)
+#     o1 = _copy_sign(x, matrix[..., 2, 1] - matrix[..., 1, 2])
+#     o2 = _copy_sign(y, matrix[..., 0, 2] - matrix[..., 2, 0])
+#     o3 = _copy_sign(z, matrix[..., 1, 0] - matrix[..., 0, 1])
+#     return torch.stack((o0, o1, o2, o3), -1)
 
 
 # def simple_test():

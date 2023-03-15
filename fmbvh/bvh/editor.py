@@ -87,7 +87,7 @@ def rectify_joint(obj: BVH, parent: str, target: str, direction: list):
     Lx = QUA(o[tis])
     Lx = MUL(Q, MUL(Lx, Q_))
     o[tis] = POS(Lx)
-    obj = bvc.write_offsets_to_bvh(obj, o)
+    obj = bvc.write_offsets_to_bvh(o, obj)
 
     return obj
 

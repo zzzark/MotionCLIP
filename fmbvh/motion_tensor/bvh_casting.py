@@ -28,7 +28,7 @@ def write_euler_to_bvh_object(trs: torch.Tensor, eul: torch.Tensor, t_bvh: bvh.p
         t_bvh.offset_data[name].order = old_order
         deg_eul = eul[i] * to_deg
         if depth == 0:
-            root = torch.concat([trs[0], deg_eul], dim=0)
+            root = torch.cat([trs[0], deg_eul], dim=0)
             t_bvh.motion_data[name].data = root.permute((1, 0)).tolist()
         else:
             t_bvh.motion_data[name].data = deg_eul.permute((1, 0)).tolist()
@@ -79,7 +79,7 @@ def get_euler_from_bvh(bvh_obj: bvh.parser.BVH, to_rad=3.1415926535/180.0) -> Tu
     # assert joint channel == 3
 
     data = [torch.tensor(e.data) for e in bvh_obj.motion_data.values()]  # [3+Jx3, Jx3, ... ]
-    data = torch.concat(data, dim=1)  # Fx(3+J3)
+    data = torch.cat(data, dim=1)  # Fx(3+J3)
     trs = data[:, :3]  # Fx3
     eul = data[:, 3:]  # FxJ3
     eul = eul * to_rad
