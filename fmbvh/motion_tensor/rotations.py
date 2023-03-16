@@ -1,3 +1,4 @@
+import warnings
 import torch
 
 
@@ -101,11 +102,12 @@ def euler_to_quaternion(eul: torch.Tensor, to_rad, order="ZYX", intrinsic=True) 
     return ret if batch else ret[0]
 
 
-def matrix_to_euler(mtx: torch.Tensor) -> torch.Tensor:
+def matrix_to_euler(mtx: torch.Tensor, fix_grad=False) -> torch.Tensor:
     """
     matrix -> euler
     :param mtx: [(B), J, 3, 3, T]
-    :return: euler, [(B), J, 3, T]
+    :param fix_grad: fix gradient when using
+    :return: euler, [(B), J, 3, T]  (order=ZYX)
     """
     batch, mtx = (True, mtx) if len(mtx.shape) == 5 else (False, mtx[None, ...])
 
@@ -120,7 +122,14 @@ def matrix_to_euler(mtx: torch.Tensor) -> torch.Tensor:
     r32 = mtx[..., 2:3, 1, :]
     r33 = mtx[..., 2:3, 2, :]
 
-    the1 = -torch.asin(torch.clip(r31, min=-0.9999, max=0.9999))
+    if not mtx.requires_grad:
+        the1 = -torch.asin(torch.clip(r31, min=-1.0, max=1.0))
+    elif not fix_grad:
+        warnings.warn("Convert a matrix with grad to euler may produce INF gradient, please set `fix_grad=True`.")
+        the1 = -torch.asin(torch.clip(r31, min=-1.0, max=1.0))
+    else:
+        the1 = -torch.asin(torch.clip(r31, min=-0.9999, max=0.9999))
+
     cos1 = torch.cos(the1)
     # pai1 = torch.atan2((r32 / cos1), (r33 / cos1))
     # phi1 = torch.atan2((r21 / cos1), (r11 / cos1))
