@@ -17,7 +17,7 @@ class CSC:
     clip_names = ['Pelvis', 'L_Hip', 'R_Hip', 'Spine1', 'L_Knee', 'R_Knee', 'Spine2', 'L_Ankle', 'R_Ankle', 'Spine3',
                   'L_Foot', 'R_Foot', 'Neck', 'L_Collar', 'R_Collar', 'Head', 'L_Shoulder', 'R_Shoulder', 'L_Elbow',
                   'R_Elbow', 'L_Wrist', 'R_Wrist', 'L_Hand', 'R_Hand']
-    clip_p_index = [-1, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 9, 12, 13, 14, 16, 17, 18, 19, 20, 21]
+    clip_p_index = [-1, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 9, 12, 13, 14, 16, 17, 18, 19, 20, 21]  # 24
 
     smpl_names = [
         'Pelvis',
@@ -27,7 +27,7 @@ class CSC:
         'L_Collar', 'L_Shoulder', 'L_Elbow', 'L_Wrist', 'L_Hand',
         'R_Collar', 'R_Shoulder', 'R_Elbow', 'R_Wrist', 'R_Hand'
     ]
-    smpl_p_index = [-1, 0, 1, 2, 3, 0, 5, 6, 7, 0, 9, 10, 11, 12, 11, 14, 15, 16, 17, 11, 19, 20, 21, 22]
+    smpl_p_index = [-1, 0, 1, 2, 3, 0, 5, 6, 7, 0, 9, 10, 11, 12, 11, 14, 15, 16, 17, 11, 19, 20, 21, 22]  # 24
 
     cmu_names = [
         'Hips',
@@ -37,7 +37,7 @@ class CSC:
         'LeftShoulder', 'LeftArm', 'LeftForeArm', 'LeftHand',
         'RightShoulder', 'RightArm', 'RightForeArm', 'RightHand'
     ]
-    cmu_p_index = [-1, 0, 1, 2, 3, 0, 5, 6, 7, 0, 9, 10, 11, 10, 13, 14, 15, 10, 17, 18, 19]
+    cmu_p_index = [-1, 0, 1, 2, 3, 0, 5, 6, 7, 0, 9, 10, 11, 10, 13, 14, 15, 10, 17, 18, 19]  # 24
 
     cmu_to_smpl = {
         'Hips': 'Pelvis',
@@ -157,9 +157,9 @@ class CSC:
             rectify_joint(cmu_obj, 'LeftUpLeg', 'LeftLeg', [+0.05, -0.95, -0.02])
             rectify_joint(cmu_obj, 'RightUpLeg', 'RightLeg', [-0.05, -0.95, -0.02])
 
-        _, bvh_qua = get_quaternion_from_bvh(cmu_obj)
-        bvh_qua = sample_frames(bvh_qua, scale_factor=cmu_obj.frame_time / (1.0 / 30.0))
-        cmu_mtx = quaternion_to_matrix(bvh_qua)
+        cmu_trs, cmu_qua = get_quaternion_from_bvh(cmu_obj)
+        cmu_qua = sample_frames(cmu_qua, scale_factor=cmu_obj.frame_time / (1.0 / 30.0))
+        cmu_mtx = quaternion_to_matrix(cmu_qua)
         smpl_mtx = torch.eye(3)[None, :, :, None].expand(len(CSC.smpl_names), 3, 3, cmu_mtx.shape[-1]).clone()
         smpl_mtx[CSC.cmu2smpl] = cmu_mtx[CSC.cmu2smpl_selected_cmu]
         if flip_root:
@@ -176,7 +176,8 @@ class CSC:
         # --------- CLIP --------- #
         smpl_r6d = matrix_to_rotation_6d(smpl_mtx)
         clip_r6d = smpl_r6d[self.smpl2clip]
-        self.clip = clip_r6d
+        clip_trs = torch.zeros_like(clip_r6d[-1:])
+        self.clip = torch.cat([clip_r6d, clip_trs], dim=0)
 
     def from_smpl(self, smpl_obj: BVH):
         self.clear()
@@ -187,7 +188,8 @@ class CSC:
         smpl_r6d = matrix_to_rotation_6d(smpl_mtx)
 
         clip_r6d = smpl_r6d[CSC.smpl2clip]
-        self.clip = clip_r6d
+        clip_trs = torch.zeros_like(clip_r6d[-1:])
+        self.clip = torch.cat([clip_r6d, clip_trs], dim=0)
 
     def from_clip(self, clip_out: torch.Tensor, flip_root=False):
         """
@@ -199,17 +201,27 @@ class CSC:
         if len(clip_out.shape) == 4:
             if clip_out.shape[0] >= 2: print("[Warning] Do not support batch size >= 2.")
             clip_out = clip_out[0]
-        clip_out = clip_out[self.clip2smpl, :, :]
-        mtx = rotation_6d_to_matrix(clip_out)
+
+        if clip_out.shape[0] == 25:
+            # rot, trs = clip_out[:-1], clip_out[-1:, :3]
+            rot = clip_out[:-1]  # just discard translation
+        else:
+            assert clip_out.shape[0] == 24, "Joint number is wrong, expected 24 joints."
+            rot = clip_out
+
+        trs = torch.zeros_like(rot[-1:, :3], device=rot.device, dtype=rot.dtype)
+        trs[:, 1, :] = self.h_smpl
+
+        rot = rot[self.clip2smpl, :, :]
+        mtx = rotation_6d_to_matrix(rot)
         if flip_root:
             mtx[0, 1].neg_()  # joint 0, y-axis
 
-        smpl_eul = matrix_to_euler(mtx)
-        smpl_trs = torch.zeros_like(smpl_eul)[[0], ...]
-        smpl_trs[:, 1, :] = self.h_smpl
+        eul = matrix_to_euler(mtx)
+        # smpl_trs = torch.zeros_like(smpl_eul)[[0], ...]
+        # smpl_trs[:, 1, :] = self.h_smpl
         self.smpl = deepcopy(self.t_smpl)
-        self.smpl = write_euler_to_bvh_object(smpl_trs, smpl_eul, self.smpl,
-                                              order='ZYX', to_deg=180.0/3.1415926535, frame_time=1.0/30.0)
+        self.smpl = write_euler_to_bvh_object(trs, eul, self.smpl, order='ZYX', frame_time=1.0/30.0)
         self.clip = clip_out
 
     def to_cmu(self) -> BVH:

@@ -198,7 +198,7 @@ class MOTIONCLIP(nn.Module):
             assert len(classes.shape) == 3
             assert classes.shape[-1] == clip_dim
             clip_features = classes.reshape([-1, clip_dim])
-            nspa, nats = classes.shape[:2]  # rm [1, #sentences]
+            nspa, nats = classes.shape[:2]  # rm [#class, #sentences]
             # y = torch.zeros(y_action_names.shape, dtype=int)
             y = clip_features
             if textual_labels is not None:

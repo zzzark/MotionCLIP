@@ -66,7 +66,7 @@ class Encoder_TRANSFORMER(nn.Module):
         self.ablation = ablation
         self.activation = activation
         
-        self.input_feats = self.njoints*self.nfeats
+        self.input_feats = self.njoints*self.nfeats  # rm 25 * 6
 
         self.muQuery = nn.Parameter(torch.randn(1, self.latent_dim))
         self.sigmaQuery = nn.Parameter(torch.randn(1, self.latent_dim))
@@ -84,10 +84,10 @@ class Encoder_TRANSFORMER(nn.Module):
 
     def forward(self, batch):
         # RM
-        #   x:     input motion sequences
-        #   y:     action label? see `src.datasets.dataset.py > line 246`
-        #   mask:  to mask the length difference of input motion sequences, see `src.models.tools.losses.py`
-        #
+        #   x:       input motion sequences, [B, 25, 6, T]
+        #   y:       action label? see `src.datasets.dataset.py > line 246`
+        #   mask:    to mask the length difference of input motion sequences, see `src.models.tools.losses.py`
+        #   return:  'mu' = [B, 512]
         x, y, mask = batch["x"], batch["y"], batch["mask"]
         bs, njoints, nfeats, nframes = x.shape
         x = x.permute((3, 0, 1, 2)).reshape(nframes, bs, njoints * nfeats)
@@ -168,11 +168,11 @@ class Decoder_TRANSFORMER(nn.Module):
         
     def forward(self, batch, use_text_emb=False):
         # RM
-        #   z:        clip latent code
+        #   z:        clip latent code, [B, 512]
         #   y:        y is z  (only used in ablation)
         #   mask:     to mask the length difference of output motion sequences, see `src.models.tools.losses.py`
         #   lengths:  lengths of motion outputs
-        #
+        #   return:   'output' = [B, 25, 6, T]
         z, y, mask, lengths = batch["z"], batch["y"], batch["mask"], batch["lengths"]
         if use_text_emb:
             z = batch["clip_text_emb"]
@@ -183,12 +183,12 @@ class Decoder_TRANSFORMER(nn.Module):
         # only for ablation / not used in the final model
         if self.ablation == "zandtime":
             yoh = F.one_hot(y, self.num_classes)
-            z = torch.cat((z, yoh), axis=1)
+            z = torch.cat((z, yoh), dim=1)
             z = self.ztimelinear(z)
             z = z[None]  # sequence of size 1
         elif self.ablation == "concat_bias":  # only for ablation / not used in the final model
             # sequence of size 2
-            z = torch.stack((z, self.actionBiases[y]), axis=0)
+            z = torch.stack((z, self.actionBiases[y]), dim=0)
         else:
             z = z[None]  # sequence of size 1  #  # rm: to first token, i.e. frame count == 1
 
