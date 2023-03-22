@@ -102,43 +102,136 @@ def euler_to_quaternion(eul: torch.Tensor, to_rad, order="ZYX", intrinsic=True) 
     return ret if batch else ret[0]
 
 
-def matrix_to_euler(mtx: torch.Tensor, fix_grad=False) -> torch.Tensor:
+# def matrix_to_euler(mtx: torch.Tensor, fix_grad=False) -> torch.Tensor:
+#     """
+#     matrix -> euler
+#     :param mtx: [(B), J, 3, 3, T]
+#     :param fix_grad: fix gradient when using
+#     :return: euler, [(B), J, 3, T]  (order=ZYX)
+#     """
+#     batch, mtx = (True, mtx) if len(mtx.shape) == 5 else (False, mtx[None, ...])
+#
+#     if len(mtx.shape) != 5 or mtx.shape[2] != 3 or mtx.shape[3] != 3:
+#         raise ValueError(f'Input tensor should be in the shape of BxJx3x3xF, but got {mtx.shape}')
+#
+#     # reference: http://eecs.qmul.ac.uk/~gslabaugh/publications/euler.pdf
+#
+#     r11 = mtx[..., 0:1, 0, :]
+#     r21 = mtx[..., 1:2, 0, :]
+#     r31 = mtx[..., 2:3, 0, :]
+#     r32 = mtx[..., 2:3, 1, :]
+#     r33 = mtx[..., 2:3, 2, :]
+#
+#     if not mtx.requires_grad:
+#         the1 = -torch.asin(torch.clip(r31, min=-1.0, max=1.0))
+#     elif not fix_grad:
+#         warnings.warn("Convert a matrix with grad to euler may produce INF gradient, please set `fix_grad=True`.")
+#         the1 = -torch.asin(torch.clip(r31, min=-1.0, max=1.0))
+#     else:
+#         the1 = -torch.asin(torch.clip(r31, min=-0.9999, max=0.9999))
+#
+#     cos1 = torch.cos(the1)
+#     # pai1 = torch.atan2((r32 / cos1), (r33 / cos1))
+#     # phi1 = torch.atan2((r21 / cos1), (r11 / cos1))
+#     # -- avoid division by zero
+#     pai1 = torch.atan2((r32 * cos1), (r33 * cos1))
+#     phi1 = torch.atan2((r21 * cos1), (r11 * cos1))
+#
+#     ret = torch.cat((phi1, the1, pai1), dim=2)
+#     return ret if batch else ret[0]
+
+
+def _angle_from_tan(
+    axis: str, other_axis: str, data, horizontal: bool, tait_bryan: bool
+):
     """
-    matrix -> euler
-    :param mtx: [(B), J, 3, 3, T]
-    :param fix_grad: fix gradient when using
-    :return: euler, [(B), J, 3, T]  (order=ZYX)
+    Extract the first or third Euler angle from the two members of
+    the matrix which are positive constant times its sine and cosine.
+
+    Args:
+        axis: Axis label "X" or "Y or "Z" for the angle we are finding.
+        other_axis: Axis label "X" or "Y or "Z" for the middle axis in the
+            convention.
+        data: Rotation matrices as tensor of shape (..., 3, 3).
+        horizontal: Whether we are looking for the angle for the third axis,
+            which means the relevant entries are in the same row of the
+            rotation matrix. If not, they are in the same column.
+        tait_bryan: Whether the first and third axes in the convention differ.
+
+    Returns:
+        Euler Angles in radians for each matrix in data as a tensor
+        of shape (...).
     """
-    batch, mtx = (True, mtx) if len(mtx.shape) == 5 else (False, mtx[None, ...])
 
-    if len(mtx.shape) != 5 or mtx.shape[2] != 3 or mtx.shape[3] != 3:
-        raise ValueError(f'Input tensor should be in the shape of BxJx3x3xF, but got {mtx.shape}')
+    i1, i2 = {"X": (2, 1), "Y": (0, 2), "Z": (1, 0)}[axis]
+    if horizontal:
+        i2, i1 = i1, i2
+    even = (axis + other_axis) in ["XY", "YZ", "ZX"]
+    if horizontal == even:
+        return torch.atan2(data[..., i1], data[..., i2])
+    if tait_bryan:
+        return torch.atan2(-data[..., i2], data[..., i1])
+    return torch.atan2(data[..., i2], -data[..., i1])
 
-    # reference: http://eecs.qmul.ac.uk/~gslabaugh/publications/euler.pdf
 
-    r11 = mtx[..., 0:1, 0, :]
-    r21 = mtx[..., 1:2, 0, :]
-    r31 = mtx[..., 2:3, 0, :]
-    r32 = mtx[..., 2:3, 1, :]
-    r33 = mtx[..., 2:3, 2, :]
+def _index_from_letter(letter: str):
+    if letter == "X":
+        return 0
+    if letter == "Y":
+        return 1
+    if letter == "Z":
+        return 2
 
-    if not mtx.requires_grad:
-        the1 = -torch.asin(torch.clip(r31, min=-1.0, max=1.0))
-    elif not fix_grad:
-        warnings.warn("Convert a matrix with grad to euler may produce INF gradient, please set `fix_grad=True`.")
-        the1 = -torch.asin(torch.clip(r31, min=-1.0, max=1.0))
+
+def matrix_to_euler(matrix, convention: str):
+    """
+    Convert rotations given as rotation matrices to Euler angles in radians.
+
+    Args:
+        matrix: Rotation matrices as tensor of shape (..., 3, 3).
+        convention: Convention string of three uppercase letters.
+
+    Returns:
+        Euler angles in radians as tensor of shape (..., 3).
+    """
+    if len(convention) != 3:
+        raise ValueError("Convention must have 3 letters.")
+    if convention[1] in (convention[0], convention[2]):
+        raise ValueError(f"Invalid convention {convention}.")
+    for letter in convention:
+        if letter not in ("X", "Y", "Z"):
+            raise ValueError(f"Invalid letter {letter} in convention string.")
+
+    frame_last = False
+    if matrix.shape[-1] != 3 and (matrix.shape[-2] == 3 == matrix.shape[-3]):
+        frame_last = True
+        matrix = torch.einsum('...ijk->...kij', matrix)
     else:
-        the1 = -torch.asin(torch.clip(r31, min=-0.9999, max=0.9999))
+        assert matrix.shape[-2] == 3, f"must be (..., 3, 3, T) or (..., 3, 3), not {matrix.shape}"
 
-    cos1 = torch.cos(the1)
-    # pai1 = torch.atan2((r32 / cos1), (r33 / cos1))
-    # phi1 = torch.atan2((r21 / cos1), (r11 / cos1))
-    # -- avoid division by zero
-    pai1 = torch.atan2((r32 * cos1), (r33 * cos1))
-    phi1 = torch.atan2((r21 * cos1), (r11 * cos1))
+    i0 = _index_from_letter(convention[0])
+    i2 = _index_from_letter(convention[2])
+    tait_bryan = i0 != i2
+    if tait_bryan:
+        central_angle = torch.asin(
+            matrix[..., i0, i2] * (-1.0 if i0 - i2 in [-1, 2] else 1.0)
+        )
+    else:
+        central_angle = torch.acos(matrix[..., i0, i0])
 
-    ret = torch.cat((phi1, the1, pai1), dim=2)
-    return ret if batch else ret[0]
+    o = (
+        _angle_from_tan(
+            convention[0], convention[1], matrix[..., i2], False, tait_bryan
+        ),
+        central_angle,
+        _angle_from_tan(
+            convention[2], convention[1], matrix[..., i0, :], True, tait_bryan
+        ),
+    )
+    ret = torch.stack(o, -1)
+    if frame_last:
+        ret = torch.einsum('...ij->...ji', ret)
+    return ret
 
 
 def quaternion_to_euler(qua: torch.Tensor, order='XYZ', intrinsic=True) -> torch.Tensor:
@@ -202,22 +295,18 @@ def quaternion_to_euler(qua: torch.Tensor, order='XYZ', intrinsic=True) -> torch
     return ret if batch else ret[0]
 
 
-def quaternion_to_euler_2(qua: torch.Tensor, order, intrinsic) -> torch.Tensor:
+def quaternion_to_euler_2(qua: torch.Tensor, order) -> torch.Tensor:
     """
     quaternion to euler
     :param qua:  [(B), J, 4, T]
     :param order: rotation order of euler angles
-    :param intrinsic: intrinsic rotation or extrinsic rotation
     :return: [(B), J, 3, T]
     """
     if len(qua.shape) != 4 or qua.shape[2] != 4:
         raise ValueError('Input tensor must be in the shape of BxJx4xF.')
 
-    if order != "ZYX" or intrinsic:  # only export "ZYX" euler angles, in extrinsic rotation
-        raise NotImplementedError
-
     mtx = quaternion_to_matrix(qua)
-    eul = matrix_to_euler(mtx)
+    eul = matrix_to_euler(mtx, order)
     return eul
 
 

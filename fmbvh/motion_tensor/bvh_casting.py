@@ -4,8 +4,8 @@ import fmbvh.motion_tensor as mot
 from typing import Tuple
 
 
-def write_euler_to_bvh_object(trs: torch.Tensor, eul: torch.Tensor, t_bvh: bvh.parser.BVH,
-                              order='ZYX', to_deg=180.0/3.1415926535, frame_time=None):
+def write_euler_to_bvh(trs: torch.Tensor, eul: torch.Tensor, t_bvh: bvh.parser.BVH,
+                       order='ZYX', to_deg=180.0/3.1415926535, frame_time=None):
     """
     write euler(rad) to bvh object(NOTE: this will overwrite `t_bvh`) (degree)
     :param trs:  1x3xF
@@ -38,9 +38,9 @@ def write_euler_to_bvh_object(trs: torch.Tensor, eul: torch.Tensor, t_bvh: bvh.p
     return t_bvh
 
 
-def write_quaternion_to_bvh_object(trs: torch.Tensor, qua: torch.Tensor,
-                                   t_bvh: bvh.parser.BVH, to_deg=180.0/3.1415926535,
-                                   frame_time=None):
+def write_quaternion_to_bvh(trs: torch.Tensor, qua: torch.Tensor,
+                            t_bvh: bvh.parser.BVH, to_deg=180.0/3.1415926535,
+                            frame_time=None):
     """
     write quaternion to bvh object(NOTE: this will overwrite `t_bvh`) (degree),
     the quaternions will be normalized automatically.
@@ -54,7 +54,7 @@ def write_quaternion_to_bvh_object(trs: torch.Tensor, qua: torch.Tensor,
     qua = mot.rotations.normalize_quaternion(qua[None, ...])
     eul = mot.rotations.quaternion_to_euler(qua, order='ZYX', intrinsic=False)[0]
     # eul = mot.rotations.quaternion_to_euler_2(qua, order='ZYX', intrinsic=False)  # slower
-    return write_euler_to_bvh_object(trs, eul, t_bvh, 'ZYX', to_deg, frame_time)
+    return write_euler_to_bvh(trs, eul, t_bvh, 'ZYX', to_deg, frame_time)
 
 
 def write_offsets_to_bvh(offsets: torch.Tensor, bvh_obj: bvh.parser.BVH):

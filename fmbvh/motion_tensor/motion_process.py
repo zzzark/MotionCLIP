@@ -19,7 +19,7 @@ def sample_frames(motion: torch.Tensor, scale_factor=None, target_frame=None, sa
     """
     assert len(motion.shape) == 3, 'input rotation should be Jx(3/4)xF'
 
-    if scale_factor is not None:
+    if scale_factor is not None and abs(scale_factor - 1.0) > 1e-3:
         # noinspection PyArgumentList
         motion = F.interpolate(motion, size=None, recompute_scale_factor=False, scale_factor=scale_factor, mode=sampler)
 

@@ -1,5 +1,7 @@
 # CMU, SMPL, CLIP
 from copy import deepcopy
+
+import fmbvh.motion_tensor.kinematics
 from fmbvh.motion_tensor.bvh_casting import *
 from fmbvh.motion_tensor.motion_process import sample_frames
 from fmbvh.motion_tensor.rotations import *
@@ -7,12 +9,22 @@ from fmbvh.bvh.editor import rectify_joint
 import torch
 from src.models.smpl import SMPL
 from fmbvh.bvh.parser import BVH, JointMotion, JointOffset
-from fmbvh.motion_tensor.bvh_casting import write_euler_to_bvh_object, get_positions_from_bvh
+from fmbvh.motion_tensor.bvh_casting import write_euler_to_bvh, get_positions_from_bvh
 from fmbvh.bvh.editor import reorder_bvh
 from collections import OrderedDict
 
 
 # One instance for three motion types: CMU, SMPL, CLIP
+# NOTE:
+#       Currently we only support the following conversion:
+#           1) cmu.bvh      -> clip.tensor
+#           2) clip.tensor  -> smpl.bvh
+#       More features to add:
+#           3) cmu.bvh     -> smpl.bvh
+#           4) clip.tensor -> cmu.bvh
+#           5) smpl.bvh    -> cmu.bvh
+#           6) smpl.bvh    -> clip.tensor
+#
 class CSC:
     clip_names = ['Pelvis', 'L_Hip', 'R_Hip', 'Spine1', 'L_Knee', 'R_Knee', 'Spine2', 'L_Ankle', 'R_Ankle', 'Spine3',
                   'L_Foot', 'R_Foot', 'Neck', 'L_Collar', 'R_Collar', 'Head', 'L_Shoulder', 'R_Shoulder', 'L_Elbow',
@@ -28,6 +40,7 @@ class CSC:
         'R_Collar', 'R_Shoulder', 'R_Elbow', 'R_Wrist', 'R_Hand'
     ]
     smpl_p_index = [-1, 0, 1, 2, 3, 0, 5, 6, 7, 0, 9, 10, 11, 12, 11, 14, 15, 16, 17, 11, 19, 20, 21, 22]  # 24
+    smpl_r_ankle_index = 7  # FIXME: left joint and right joint are swapped
 
     cmu_names = [
         'Hips',
@@ -47,6 +60,7 @@ class CSC:
         'LeftShoulder': 'L_Collar', 'LeftArm': 'L_Shoulder', 'LeftForeArm': 'L_Elbow', 'LeftHand': 'L_Wrist',
         'RightShoulder': 'R_Collar', 'RightArm': 'R_Shoulder', 'RightForeArm': 'R_Elbow', 'RightHand': 'R_Wrist',
     }
+    smpl_scale = 10.0
 
     clip2smpl = []
     smpl2clip = []
@@ -65,7 +79,7 @@ class CSC:
     __t_smpl: BVH = None
 
     @staticmethod
-    def gen_smpl_t_pose(smpl_model: SMPL, scale=10.0, place_on_floor=True, flip_skeleton=False) -> BVH:
+    def gen_smpl_t_pose(smpl_model: SMPL, place_on_floor=True, flip_skeleton=False) -> BVH:
         """
         smpl_model: SMPL().eval()
         scale: output scale
@@ -89,7 +103,7 @@ class CSC:
 
         # ----------------------------- #
         p = pose[0]  # batch 0
-        p *= scale
+        p *= CSC.smpl_scale
         if flip_skeleton:
             p.neg_()  # fix upside-down
 
@@ -114,7 +128,7 @@ class CSC:
 
         trs = torch.zeros(1, 3, obj.frames)
         eul = torch.zeros(len(CSC.clip_names), 3, obj.frames)
-        write_euler_to_bvh_object(trs, eul, obj)
+        write_euler_to_bvh(trs, eul, obj)
         reorder_bvh(obj)  # make joints ordered
 
         if place_on_floor:
@@ -124,12 +138,12 @@ class CSC:
             else:
                 y_min = -torch.max(pos, dim=0)[0][1].item()
             trs[:, 1, :] = -y_min
-            write_euler_to_bvh_object(trs, eul, obj)
+            write_euler_to_bvh(trs, eul, obj)
 
         CSC.__t_smpl = deepcopy(obj)
         return obj
 
-    def __init__(self, obj=None):
+    def __init__(self, obj=None, *args, **kwargs):
         self.cmu: BVH = None
         self.smpl: BVH = None
         self.clip: torch.Tensor = None
@@ -137,11 +151,13 @@ class CSC:
         self.h_smpl = self.t_smpl.motion_data[self.t_smpl.root_name].data[0][1]
 
         if isinstance(obj, BVH) and obj.root_name == CSC.cmu_names[0]:
-            self.from_cmu(obj)
+            self.from_cmu(obj, *args, **kwargs)
         elif isinstance(obj, BVH) and obj.root_name == CSC.smpl_names[0]:
-            self.from_smpl(obj)
+            self.from_smpl(obj, *args, **kwargs)
         elif isinstance(obj, torch.Tensor):
-            self.from_clip(obj)
+            self.from_clip(obj, *args, **kwargs)
+        elif obj is None:
+            pass
         else:
             raise ValueError("Invalid argument `obj`")
 
@@ -157,41 +173,62 @@ class CSC:
             rectify_joint(cmu_obj, 'LeftUpLeg', 'LeftLeg', [+0.05, -0.95, -0.02])
             rectify_joint(cmu_obj, 'RightUpLeg', 'RightLeg', [-0.05, -0.95, -0.02])
 
+        t_cmu = get_t_pose_from_bvh(cmu_obj)
+        h_cmu = -t_cmu[:, 1, :].min().item()
         cmu_trs, cmu_qua = get_quaternion_from_bvh(cmu_obj)
         cmu_qua = sample_frames(cmu_qua, scale_factor=cmu_obj.frame_time / (1.0 / 30.0))
+        cmu_trs = sample_frames(cmu_trs, scale_factor=cmu_obj.frame_time / (1.0 / 30.0))
+        cmu_trs -= cmu_trs[:, :, 0:1].clone()  # move first frame's root joint to origin
+
         cmu_mtx = quaternion_to_matrix(cmu_qua)
-        smpl_mtx = torch.eye(3)[None, :, :, None].expand(len(CSC.smpl_names), 3, 3, cmu_mtx.shape[-1]).clone()
-        smpl_mtx[CSC.cmu2smpl] = cmu_mtx[CSC.cmu2smpl_selected_cmu]
-        if flip_root:
-            smpl_mtx[0, 1].neg_()
 
         # --------- SMPL --------- #
-        smpl_eul = matrix_to_euler(rotation_6d_to_matrix(matrix_to_rotation_6d(smpl_mtx)))
-        smpl_trs = torch.zeros_like(smpl_eul[[0], :, :])
-        smpl_trs[:, 1, :] = self.h_smpl
-        self.smpl = deepcopy(self.t_smpl)
-        self.smpl = write_euler_to_bvh_object(smpl_trs, smpl_eul, self.smpl,
-                                              order='ZYX', to_deg=180.0/3.1415926535, frame_time=1/30.0)
+        smpl_mtx = torch.eye(3)[None, :, :, None].expand(len(CSC.smpl_names), 3, 3, cmu_mtx.shape[-1]).clone()
+        smpl_mtx[CSC.cmu2smpl] = cmu_mtx[CSC.cmu2smpl_selected_cmu]
+        smpl_trs = cmu_trs / h_cmu * self.h_smpl  # height scaling
+        if flip_root:
+            # rotate z-axis -90 deg
+            # [ 0 -1  0] [x]     [-y]
+            # [ 1  0  0] [y]  =  [ x]
+            # [ 0  0  1] [z]     [ z]
+            smpl_mtx[0, 1], smpl_mtx[0, 2] = -smpl_mtx[0, 2].clone(), smpl_mtx[0, 1].clone()
+            smpl_trs[:, 1, :], smpl_trs[:, 2, :] = -smpl_trs[:, 2, :].clone(), smpl_trs[:, 1, :].clone()
+            smpl_trs[:, 0, :].neg_()
+
+        # set root position
+        smpl_off = get_offsets_from_bvh(self.t_smpl)
+        smpl_pos = fmbvh.motion_tensor.kinematics.forward_kinematics(CSC.smpl_p_index, smpl_mtx, smpl_trs, smpl_off)
+        smpl_ank = smpl_pos[CSC.smpl_r_ankle_index]
+        ankle_delta = smpl_ank[:, 1:] - smpl_ank[:, 0:1]
+        smpl_trs[0, :, 1:] -= ankle_delta
+
+        # # TODO: export cmu to smpl
+        # self.smpl = deepcopy(self.t_smpl)
+        # smpl_eul = matrix_to_euler(smpl_mtx, 'ZYX')
+        # self.smpl = write_euler_to_bvh(smpl_trs, smpl_eul, self.smpl,
+        #                                order='ZYX', to_deg=180.0/3.1415926535, frame_time=1/30.0)
 
         # --------- CLIP --------- #
         smpl_r6d = matrix_to_rotation_6d(smpl_mtx)
         clip_r6d = smpl_r6d[self.smpl2clip]
         clip_trs = torch.zeros_like(clip_r6d[-1:])
+        clip_trs[:, :3, :] = smpl_trs / self.h_smpl
         self.clip = torch.cat([clip_r6d, clip_trs], dim=0)
 
-    def from_smpl(self, smpl_obj: BVH):
-        self.clear()
+    def from_smpl(self, smpl_obj: BVH, flip_root=True):
+        raise NotImplementedError
+        # self.clear()
+        #
+        # self.smpl = smpl_obj
+        # _, smpl_qua = get_quaternion_from_bvh(self.smpl)
+        # smpl_mtx = quaternion_to_matrix(smpl_qua)
+        # smpl_r6d = matrix_to_rotation_6d(smpl_mtx)
+        #
+        # clip_r6d = smpl_r6d[CSC.smpl2clip]
+        # clip_trs = torch.zeros_like(clip_r6d[-1:])
+        # self.clip = torch.cat([clip_r6d, clip_trs], dim=0)
 
-        self.smpl = smpl_obj
-        _, smpl_qua = get_quaternion_from_bvh(self.smpl)
-        smpl_mtx = quaternion_to_matrix(smpl_qua)
-        smpl_r6d = matrix_to_rotation_6d(smpl_mtx)
-
-        clip_r6d = smpl_r6d[CSC.smpl2clip]
-        clip_trs = torch.zeros_like(clip_r6d[-1:])
-        self.clip = torch.cat([clip_r6d, clip_trs], dim=0)
-
-    def from_clip(self, clip_out: torch.Tensor, flip_root=False):
+    def from_clip(self, clip_out: torch.Tensor, flip_root=True, discard_translation=False):
         """
         clip_out: [(B), J, C, T], from MOTION CLIP
         flip_root: Flip root rotation of MOTION CLIP output or not. Should be False if smpl origin t-pose is used.
@@ -203,25 +240,31 @@ class CSC:
             clip_out = clip_out[0]
 
         if clip_out.shape[0] == 25:
-            # rot, trs = clip_out[:-1], clip_out[-1:, :3]
-            rot = clip_out[:-1]  # just discard translation
+            rot, trs = clip_out[:-1], clip_out[-1:, :3]
+            trs *= CSC.smpl_scale
         else:
             assert clip_out.shape[0] == 24, "Joint number is wrong, expected 24 joints."
             rot = clip_out
+            discard_translation = True
 
-        trs = torch.zeros_like(rot[-1:, :3], device=rot.device, dtype=rot.dtype)
-        trs[:, 1, :] = self.h_smpl
+        if discard_translation:
+            trs = torch.zeros_like(rot[-1:, :3], device=rot.device, dtype=rot.dtype)
 
         rot = rot[self.clip2smpl, :, :]
         mtx = rotation_6d_to_matrix(rot)
         if flip_root:
-            mtx[0, 1].neg_()  # joint 0, y-axis
+            # rotate z-axis +90 deg
+            # [ 1  0  0] [x]     [ x]
+            # [ 0  0 -1] [y]  =  [-z]
+            # [ 0  1  0] [z]     [ y]
+            mtx[0, 1], mtx[0, 2] = -mtx[0, 2].clone(), mtx[0, 1].clone()
+            trs[:, 1, :], trs[:, 2, :] = -trs[:, 2, :].clone(), trs[:, 1, :].clone()
 
-        eul = matrix_to_euler(mtx)
+        eul = matrix_to_euler(mtx, "ZYX")
         # smpl_trs = torch.zeros_like(smpl_eul)[[0], ...]
         # smpl_trs[:, 1, :] = self.h_smpl
         self.smpl = deepcopy(self.t_smpl)
-        self.smpl = write_euler_to_bvh_object(trs, eul, self.smpl, order='ZYX', frame_time=1.0/30.0)
+        self.smpl = write_euler_to_bvh(trs, eul, self.smpl, order='ZYX', frame_time=1.0 / 30.0)
         self.clip = clip_out
 
     def to_cmu(self) -> BVH:
@@ -243,28 +286,32 @@ class CSC:
 CSC.__static_init__()
 
 
-def main():
-    # -------- FIRST: MAKE SURE {CLIP -> SMPL} IS CORRECT -------- #
-    output = torch.load("./output/tmp_save.pth")['output']
-    for i in range(output.shape[0]):
-        obj = CSC(output[i])
-        obj.smpl.to_file(f"./output/out_{i}.bvh")
-
-    # -------- SECOND: LET CMU -> SMPL, CLIP && TEST THEM -------- #
-    obj = CSC(BVH("./assets/cmu21.bvh"))
-    obj.smpl.to_file("./output/csc_cmu_to_smpl.bvh")
-    torch.save(obj.clip, "./output/csc_cmu_to_clip.pth")
-
-    # CMU -> {CLIP -> SMPL} # direct
-    obj = CSC(torch.load("./output/csc_cmu_to_clip.pth"))
-    obj.smpl.to_file("./output/cmu_to_clip_to_smpl.bvh")
-
-    # CMU -> SMPL -> {CLIP -> SMPL}  # cycle
-    obj = CSC(BVH("./output/csc_cmu_to_smpl.bvh"))
-    torch.save(obj.clip, "./output/csc_cmu_to_smpl_to_clip.pth")
-    obj = CSC(torch.load("./output/csc_cmu_to_smpl_to_clip.pth"))
-    obj.smpl.to_file("./output/csc_cmu_to_smpl_to_clip_to_smpl.bvh")
-
-
-if __name__ == '__main__':
-    main()
+# def main():
+#     # -------- FIRST: MAKE SURE {CLIP -> SMPL} IS CORRECT -------- #
+#     output = torch.load("./output/real_input.pth")
+#     # output = output.cpu()
+#     # torch.save(output, "./output/real_input.pth")
+#
+#     for i in range(output.shape[0]):
+#         obj = CSC(output[i])
+#         obj.smpl.to_file(f"./output/real_{i}.bvh")
+#         if i >= 2:
+#             break
+#
+#     # -------- SECOND: LET CMU -> SMPL, CLIP && TEST THEM -------- #
+#     obj = CSC(BVH("./assets/cmu21.bvh"))
+#     torch.save(obj.clip, "./output/csc_cmu_to_clip.pth")
+#
+#     # CMU -> {CLIP -> SMPL} # direct
+#     obj = CSC(torch.load("./output/csc_cmu_to_clip.pth"))
+#     obj.smpl.to_file("./output/cmu_to_clip_to_smpl.bvh")
+#
+#     # # CMU -> SMPL -> {CLIP -> SMPL}  # cycle
+#     # obj = CSC(BVH("./output/csc_cmu_to_smpl.bvh"))
+#     # torch.save(obj.clip, "./output/csc_cmu_to_smpl_to_clip.pth")
+#     # obj = CSC(torch.load("./output/csc_cmu_to_smpl_to_clip.pth"))
+#     # obj.smpl.to_file("./output/csc_cmu_to_smpl_to_clip_to_smpl.bvh")
+#
+#
+# if __name__ == '__main__':
+#     main()

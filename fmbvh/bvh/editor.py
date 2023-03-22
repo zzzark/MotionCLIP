@@ -82,7 +82,7 @@ def rectify_joint(obj: BVH, parent: str, target: str, direction: list):
     Qx[1:] = MUL(Q, Qx[1:])
     Qx = RECT(NORM(Qx))
     q[pis] = Qx[:]
-    obj = bvc.write_quaternion_to_bvh_object(t, q, obj)
+    obj = bvc.write_quaternion_to_bvh(t, q, obj)
 
     Lx = QUA(o[tis])
     Lx = MUL(Q, MUL(Lx, Q_))
@@ -152,10 +152,10 @@ def shift_joint(obj: BVH, target_name: str, offset: list):
         vec = ROTATE(Qp_, Lt_) + ROTATE(MUL(Qp_, Qt_), Lc_) - ROTATE(Qp_, Ltp)
         vec = MUL(INV(Qp_), MUL(vec, Qp_))
         tqp = V2Q(POS(Lcp), POS(vec))  # what the target rotation should be for every child
-        tqp = tqp.mean(dim=0, keepdims=True)  # get the average result if there are multiple children
+        tqp = tqp.mean(dim=0, keepdim=True)  # get the average result if there are multiple children
         tqp = RECT(NORM(tqp))
         q[ti] = tqp
-        obj = bvc.write_quaternion_to_bvh_object(t, q, obj)
+        obj = bvc.write_quaternion_to_bvh(t, q, obj)
     else:
         pass  # just move the end-effector so there is no need to change
 
@@ -210,7 +210,7 @@ def remove_joint(obj: BVH, remove_names: [list, str], inherent='mul'):
             if len(ic) != 0:
                 Qt, Qc = q[it], q[ic]
                 q[ic] = RECT(NORM(MUL(Qt, Qc)))  # directly combine the two rotations
-                obj = bvc.write_quaternion_to_bvh_object(t, q, obj)
+                obj = bvc.write_quaternion_to_bvh(t, q, obj)
 
                 # add target offset to children
                 for cn in tj.children_names:
@@ -258,7 +258,7 @@ def remove_joint(obj: BVH, remove_names: [list, str], inherent='mul'):
 
                     q[ic] = RECT(NORM(Qc_))
 
-                obj = bvc.write_quaternion_to_bvh_object(t, q, obj)
+                obj = bvc.write_quaternion_to_bvh(t, q, obj)
             else:
                 pass  # use parent rotation
 
