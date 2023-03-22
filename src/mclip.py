@@ -52,10 +52,13 @@ def encode_text(texts, model: MOTIONCLIP):
     """
     if (isinstance(texts, list) or isinstance(texts, tuple)) and isinstance(texts[0], str):
         texts = np.array(texts, dtype=str)  # [N, $STR]
-
-    if isinstance(texts, np.ndarray):
         text_tokens = clip.tokenize(texts).to(model.device)
-
+    elif isinstance(texts, np.ndarray):
+        text_tokens = clip.tokenize(texts).to(model.device)
+    elif isinstance(texts, torch.Tensor):
+        text_tokens = texts.to(model.device)
+    else:
+        raise TypeError(f"unknown type: {type(texts)}")
     clip_features = model.clip_model.encode_text(text_tokens)
     clip_features = clip_features.float()
     return clip_features
@@ -102,7 +105,9 @@ def decode_motion(clip_features, frames, model: MOTIONCLIP):
         "mask": mask,
         "lengths": lengths
     })['output']
-    output[:, 0] = torch.tensor([1, 0, 0, 0, -1, 0]).unsqueeze(0).unsqueeze(2)
+
+    # we keep the raw output
+    # output[:, 0] = torch.tensor([1, 0, 0, 0, -1, 0]).unsqueeze(0).unsqueeze(2)
 
     return output if is_batch else output[0]
 
@@ -187,23 +192,78 @@ def calc_cos_sim(device="cuda:0"):
     load_model_wo_clip(model, state_dict)
     model.eval()  # to disable dropout and more ...
 
+    # ---- load labels ---- #
+    text_labels = [
+        "angry walk",
+        "childlike walk",
+        "depressed walk",
+        "neutral walk",
+        "old walk",
+        "proud walk",
+        "sexy walk",
+        "strutting walk",
+    ]
+    print(text_labels)
+
     # ----
     with torch.no_grad():
         import glob
-        text_ls = []
-        motion_ls = []
-        for cmu_file in glob.glob("./assets/cmu/*.bvh"):
+        feature_ls = []
+        for i, cmu_file in enumerate(glob.glob("./eval_data/xia/*.bvh")):
             obj = CSC(BVH(cmu_file))
-            if obj.clip.shape[-1] >= 60:
-                text_ls.append(cmu_file.split('/')[-1].split('\\')[-1].split('.')[0])
-                motion_ls.append(obj.clip[:, :, :60])
-            else:
-                print(f'no enough frames: {cmu_file}')
+            mo = obj.clip.to(device)
+            feature_ls.append(encode_motion(mo, model))
+            CSC(obj.clip).smpl.to_file(f"./output/__xia_{i}.bvh")
+
+        motion_features = torch.stack(feature_ls, dim=0)
+        text_features = encode_text(text_labels, model)
+        sim = cosine_similarity(text_features, motion_features, model)
+        sim = sim.cpu().numpy()
+        sim_max = np.argmax(sim, axis=1)
+        print(sim_max)
+        print(np.array(text_labels)[sim_max])
+        print()
+
+
+def action_classify(data_dir='./eval_data/cmu_eval/unlabeled', device="cuda:0"):
+    parameters = deepcopy(mclip_params)
+
+    # ---- load model ---- #
+    print(parameters['checkpointname'])
+    parameters['device'] = device
+    model = get_mclip_model(parameters)
+    state_dict = torch.load(parameters['checkpointname'], map_location=parameters["device"])
+    load_model_wo_clip(model, state_dict)
+    model.eval()  # to disable dropout and more ...
+
+    # ---- load labels ---- #
+    from src.utils.action_label_to_idx import action_label_to_idx
+    action_text_labels = list(action_label_to_idx.keys())
+    action_text_labels.sort(key=lambda x: action_label_to_idx[x])
+    text_labels = action_text_labels
+    print(text_labels)
+
+    # ----
+    with torch.no_grad():
+        import glob
+        motion_ls = []
+        for i, cmu_file in enumerate(glob.glob(f"{data_dir}/*.bvh")):
+            obj = CSC(BVH(cmu_file))
+            assert obj.clip.shape[-1] == 60, f"not 60 frames: {obj.clip.shape[-1]}; {cmu_file}"
+            motion_ls.append(obj.clip)
+
+            if not os.path.isfile(f"./output/act_cls_tmp_{i}.bvh"):
+                CSC(obj.clip).smpl.to_file(f"./output/act_cls_tmp_{i}.bvh")
         motions = torch.stack(motion_ls, dim=0).to(device)
         motion_features = encode_motion(motions, model)
 
-        print(text_ls)
-        text_features = encode_text(text_ls, model)
+        text_features = encode_text(text_labels, model)
         sim = cosine_similarity(text_features, motion_features, model)
-        print(sim)
-        print()
+        sim = sim.cpu().numpy()
+        sim_max = np.argpartition(sim, -5, axis=1)[:, -5:]
+
+        np.set_printoptions(threshold=np.inf)
+        np.set_printoptions(linewidth=np.inf)
+        np_labels = np.array(text_labels)
+        for i in range(sim_max.shape[0]):
+            print(i, ':', np_labels[sim_max[i]])

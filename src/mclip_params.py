@@ -64,6 +64,7 @@ mclip_params = {
     'input_file': './assets/rm_texts.txt',
     'zero_global_orient': False,
     'ae_after_generation': False,
+    # 'checkpointname': './exps/classes-model/checkpoint_0200.pth.tar',
     'checkpointname': './exps/paper-model/checkpoint_0100.pth.tar',
     'figname': 'fig_{:03d}',
     'num_classes': 1,

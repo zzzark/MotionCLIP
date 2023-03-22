@@ -12,8 +12,12 @@ import clip
 from src.visualize.visualize import get_gpu_device
 from src.utils.action_label_to_idx import action_label_to_idx
 
-if __name__ == '__main__':
+
+def main():
     parameters, folder, checkpointname, epoch = parser(checkpoint=True)
+
+    parameters['checkpointname'] = './exps/classes-model/checkpoint_0200.pth.tar'
+
     gpu_device = get_gpu_device()
     parameters["device"] = f"cuda:{gpu_device}"
     data_split = 'vald'  # Hardcoded
@@ -76,3 +80,7 @@ if __name__ == '__main__':
 
         print(f"Top-5 Acc. : {100 * correct_preds_top_5 / total_samples:.2f}%  ({correct_preds_top_5}/{total_samples})")
         print(f"Top-1 Acc. : {100 * correct_preds_top_1 / total_samples:.2f}%  ({correct_preds_top_1}/{total_samples})")
+
+
+if __name__ == '__main__':
+    main()
